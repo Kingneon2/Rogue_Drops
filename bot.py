@@ -1,19 +1,31 @@
-# Add this import
-from telegram.constants import ChatMemberStatus
+import os
+import logging
+from flask import Flask
+from threading import Thread
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
-# Your Channel Handle
-CHANNEL_USERNAME = '@yourchannelhandle' 
+# Setup Flask for Keep-Alive
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "Bot is alive!"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_chat.id
+def run():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+# Bot Logic
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN') # Set this in Render Environment Variables
+ADMIN_ID = 1875307475
+
+async def start(update, context):
+    await update.message.reply_text("You are subscribed!")
+
+if __name__ == '__main__':
+    # Start Keep-Alive Server
+    Thread(target=run).start()
     
-    # Check if user is in channel
-    try:
-        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-            save_user(user_id)
-            await update.message.reply_text("Welcome! You are subscribed.")
-        else:
-            await update.message.reply_text(f"Please join {CHANNEL_USERNAME} first to use this bot.")
-    except Exception as e:
-        await update.message.reply_text("Error checking membership. Make sure the bot is an admin in the channel.")
+    # Start Bot
+    application = ApplicationBuilder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.run_polling()
+    
