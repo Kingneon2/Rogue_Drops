@@ -15,10 +15,9 @@ def run_server():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # --- Configuration ---
-# Set TELEGRAM_BOT_TOKEN in Render Environment Variables
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 ADMIN_ID = 1875307475
-CHANNEL_USERNAME = '@your_channel_handle' # Replace with your actual channel @handle
+CHANNEL_USERNAME = '@your_channel_handle' # Ensure this matches your channel's handle
 CHANNEL_LINK = 'https://t.me/+ckfO94UHyhllODg0'
 
 users = set()
@@ -29,7 +28,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # 1. Membership Check
     try:
-        # NOTE: Bot must be an Administrator in your channel for this to work
         member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         if member.status not in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
             await update.message.reply_text(f"Please join our channel first to use this bot:\n{CHANNEL_LINK}")
@@ -40,9 +38,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. Add to list
     users.add(user_id)
     
-    # 3. Transparent Button
+    # 3. Split Button Layout
     keyboard = [
-        [InlineKeyboardButton("Request specific accounts", url="https://t.me/roguenomad_bot")]
+        [
+            InlineKeyboardButton("Request specific accounts", url="https://t.me/roguenomad_bot"),
+            InlineKeyboardButton("Join Channel", url=CHANNEL_LINK)
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -54,7 +55,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, reply_markup=reply_markup)
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only allow Admin to broadcast
     if update.effective_user.id != ADMIN_ID:
         return
 
@@ -70,10 +70,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
 if __name__ == '__main__':
-    # Start Keep-Alive Server
     Thread(target=run_server).start()
-    
-    # Start Bot
     application = ApplicationBuilder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
